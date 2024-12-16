@@ -1,0 +1,80 @@
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+
+# Function to detect anomalies in wallet activity
+def detect_anomalies(transactions):
+    """
+    Detect anomalies in wallet activity.
+    
+    Parameters:
+        transactions (pd.DataFrame): A DataFrame containing transaction data with columns -
+            'wallet_id', 'timestamp', 'amount'.
+
+    Returns:
+        pd.DataFrame: Anomalous transactions with an additional 'anomaly_reason' column.
+    """
+    # Convert timestamp to datetime
+    transactions['timestamp'] = pd.to_datetime(transactions['timestamp'])
+
+    # Sort transactions by wallet_id and timestamp
+    transactions = transactions.sort_values(by=['wallet_id', 'timestamp'])
+
+    # Add a column for transaction amount z-scores
+    transactions['amount_zscore'] = (
+        transactions.groupby('wallet_id')['amount']
+        .transform(lambda x: (x - x.mean()) / x.std())
+    )
+
+    # Detect anomalies based on z-score threshold
+    zscore_threshold = 3  # Customize threshold as needed
+    transactions['is_amount_anomalous'] = abs(transactions['amount_zscore']) > zscore_threshold
+
+    # Add a column for inter-transaction time (time since last transaction)
+    transactions['time_since_last_tx'] = (
+        transactions.groupby('wallet_id')['timestamp']
+        .transform(lambda x: x.diff().dt.total_seconds())
+    )
+
+    # Detect anomalies based on time since last transaction
+    time_threshold = 86400  # Example: 1 day (in seconds)
+    transactions['is_time_anomalous'] = transactions['time_since_last_tx'] > time_threshold
+
+    # Combine anomaly reasons
+    conditions = [
+        transactions['is_amount_anomalous'],
+        transactions['is_time_anomalous']
+    ]
+    reasons = [
+        'Unusual transaction amount',
+        'Unusual transaction frequency'
+    ]
+    transactions['anomaly_reason'] = np.select(conditions, reasons, default='No anomaly')
+
+    # Filter for anomalies
+    anomalies = transactions[transactions['anomaly_reason'] != 'No anomaly']
+
+    return anomalies
+
+# Example usage
+def main():
+    # Sample transaction data
+    data = {
+        'wallet_id': ['w1', 'w1', 'w1', 'w2', 'w2', 'w2'],
+        'timestamp': [
+            '2024-12-15 10:00:00', '2024-12-15 12:00:00', '2024-12-16 15:00:00',
+            '2024-12-15 08:00:00', '2024-12-15 20:00:00', '2024-12-17 10:00:00'
+        ],
+        'amount': [100, 105, 1000, 50, 52, 5000]
+    }
+
+    transactions = pd.DataFrame(data)
+
+    # Detect anomalies
+    anomalies = detect_anomalies(transactions)
+
+    print("Anomalies detected:")
+    print(anomalies)
+
+if __name__ == "__main__":
+    main()
